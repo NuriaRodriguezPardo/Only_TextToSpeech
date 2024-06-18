@@ -7,12 +7,14 @@
 #include <SD.h>
 #include <Audio.h>
 #include <SPI.h>
-#include <Base64.h>
-#include "Base64.h"
+#include <stdio.h>
+#include "base64.hpp"
 
+void connectToWiFi();
+bool initSD();
 String getLanguageCode(const char* languageName);
-String speakText(String text, const char* apiKey, String targetLanguage);
-bool saveAudioToSD(const char* base64Audio, const char* filename);
+const char* speakText(const char* text, const char* apiKey, String targetLanguage);
+void decode_base64_to_file(const char* base64_input, const char* output_file);
 
 // VARIABLES / CONTRASENYES
 const char* ssid = "RedmiNuria";
@@ -20,7 +22,39 @@ const char* password = "Patata123";
 const char* apiKey = "AIzaSyAK2DlXI83cBLEFxhvFsrUNnMU5m51c_Ms";
 const char* apiKey2 = "AIzaSyCz4Pb-7OIi3Gs6LGgJ-XHZ2Xy__hRAeZQ";
 
-// Función para conectar a WiFi
+
+void setup() {
+    Serial.begin(115200);
+
+    // Conectar a WiFi
+    connectToWiFi();
+
+    // Inicializar tarjeta SD
+    if (!initSD()) {
+        return;
+    }
+
+    // Texto a convertir en voz
+    const char* text = "Hola, como estas? Yo soy Núria, y tu? Esto es una prueba para saber si google soporta audios grandes, porque con el mio no va.";
+
+    // Idioma de destino
+    const char* idioma = "Spanish";
+    String targetLanguage = getLanguageCode(idioma);
+
+    // Obtener el audio en Base64 desde Google Cloud Text-to-Speech
+    const char* base64Audio = speakText(text, apiKey, targetLanguage);
+    // Verificar si se obtuvo el audio correctamente
+    if (strlen(base64Audio) > 0)
+    {
+        // Ejemplo de cadena Base64 (deberías usar tu propia cadena Base64 de audio)
+        const char* output_file = "/AudioDecodificado_hola.wav";
+        decode_base64_to_file(base64Audio, output_file);
+        Serial.println("Archivo de audio decodificado guardado como AudioDecodificado.wav");
+    } else {
+        Serial.println("Error al obtener el audio desde Google Cloud Text-to-Speech.");
+    }
+}
+
 void connectToWiFi() {
     WiFi.begin(ssid, password);
     Serial.print("Conectando a WiFi");
@@ -44,40 +78,56 @@ bool initSD() {
   return true;
 }
 
-void setup() {
-  Serial.begin(115200);
+// En const char*
+const char* speakText(const char* text, const char* apiKey, String targetLanguage) {
+    HTTPClient http;
+    String url = "https://texttospeech.googleapis.com/v1/text:synthesize?key=";
+    url += apiKey;
 
-  // Conectar a WiFi
-  connectToWiFi();
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
 
-  // Inicializar tarjeta SD
-  if (!initSD()) {
-    return;
-  }
+    String jsonBody = "{\"input\":{\"text\":\"";
+    jsonBody += text;
+    jsonBody += "\"},\"voice\":{\"languageCode\":\"";
+    jsonBody += targetLanguage;
+    jsonBody += "\"},\"audioConfig\":{\"audioEncoding\":\"MP3\"}}";
 
-  // Texto a convertir en voz
-  String text = "Hola, ¿cómo estás?";
+    int httpResponseCode = http.POST(jsonBody);
 
-  // Idioma de destino
-  const char* idioma = "Spanish";
-  String targetLanguage = getLanguageCode(idioma);
+    if (httpResponseCode == HTTP_CODE_OK) {
+        String response = http.getString();
+        http.end();
+        Serial.println(response);
 
-  // Obtener el audio en Base64 desde Google Cloud Text-to-Speech
-  String base64Audio = speakText(text, apiKey, targetLanguage);
-  // Verificar si se obtuvo el audio correctamente
-  if (base64Audio.length() > 0) {
-    // Guardar el audio en la tarjeta SD
-    const char* filename = "/audio.WAV";  // Cambia la extensión según el formato del audio
-    /*
-    if (saveAudioToSD(base64Audio.c_str(), filename)) {
-      Serial.println("Archivo de audio guardado correctamente.");
+        // Usar ArduinoJson para parsear la respuesta JSON
+        DynamicJsonDocument doc(1024);
+        DeserializationError error = deserializeJson(doc, response);
+        if (error) {
+            Serial.print("Error al parsear JSON: ");
+            Serial.println(error.f_str());
+            return nullptr;
+        }
+
+        const char* base64Audio = doc["audioContent"];
+        if (!base64Audio) {
+            Serial.println("No se encontró audioContent en la respuesta JSON");
+            return nullptr;
+        }
+
+        // Asignar memoria para el contenido base64 y copiar la cadena
+        char* audioBuffer = (char*)malloc(strlen(base64Audio) + 1);
+        if (audioBuffer) {
+            strcpy(audioBuffer, base64Audio);
+        }
+        return audioBuffer;
+        
     } else {
-      Serial.println("Error al guardar el archivo de audio.");
+        Serial.print("Error en la solicitud: ");
+        Serial.println(httpResponseCode);
+        http.end();
+        return nullptr;
     }
-    */
-  } else {
-    Serial.println("Error al obtener el audio desde Google Cloud Text-to-Speech.");
-  }
 }
 
 String getLanguageCode(const char* languageName) {
@@ -114,74 +164,62 @@ String getLanguageCode(const char* languageName) {
     return languageCode;
 }
 
-String speakText(String text, const char* apiKey, String targetLanguage) {
-    HTTPClient http;
-    String url = "https://texttospeech.googleapis.com/v1/text:synthesize?key=";
-    url += apiKey;
+// Función para guardar el archivo .mp3 desde una cadena Base64 decodificada
+void guardarAudioDesdeBase64(const char* base64String, const char* nombreArchivo) {
+  // Decodificar Base64
+  unsigned int base64Length = strlen(base64String);
+  Serial.print("Longitud de Base64: ");
+  Serial.println(base64Length);
 
-    http.begin(url);
-    http.addHeader("Content-Type", "application/json");
+  unsigned int decodedLength = decode_base64_length((unsigned char*)base64String, base64Length);
+  Serial.print("Longitud decodificada esperada: ");
+  Serial.println(decodedLength);
 
-    String jsonBody = "{\"input\":{\"text\":\"";
-    jsonBody += text;
-    jsonBody += "\"},\"voice\":{\"languageCode\":\"";
-    jsonBody += targetLanguage;
-    jsonBody += "\"},\"audioConfig\":{\"audioEncoding\":\"MP3\"}}";
+  unsigned char decodedBytes[decodedLength];
 
-    int httpResponseCode = http.POST(jsonBody);
+  // Decodificar
+  decodedLength = decode_base64((unsigned char*)base64String, base64Length, decodedBytes);
+  Serial.print("Longitud decodificada real: ");
+  Serial.println(decodedLength);
 
-    if (httpResponseCode == HTTP_CODE_OK) {
-        String response = http.getString();
-        // Extraer y retornar el contenido de audio
-        int audioStart = response.indexOf("\"audioContent\": \"") + 17;
-        int audioEnd = response.indexOf("\"", audioStart);
-        String audioContent = response.substring(audioStart, audioEnd);
-        Serial.println(response); 
-        return audioContent;
-    } else {
-        Serial.print("Error en la solicitud: ");
-        Serial.println(httpResponseCode);
-        return "";
+  // Verificar si la decodificación fue exitosa
+  if (decodedLength > 0) {
+    // Abrir archivo para escritura en la tarjeta SD
+    File archivo = SD.open(nombreArchivo, FILE_WRITE);
+    if (!archivo) {
+      Serial.println("Error al abrir el archivo en la tarjeta SD.");
+      return;
     }
 
-    http.end();
+    // Escribir el contenido decodificado en el archivo
+    archivo.write(decodedBytes, decodedLength);
+
+    // Cerrar archivo
+    archivo.close();
+    Serial.println("Archivo de audio guardado correctamente en la tarjeta SD.");
+  } else {
+    Serial.println("Error en la decodificación o tamaño de datos decodificados igual a 0.");
+  }
 }
 
-/*
-// Función para decodificar Base64 y guardar el archivo de audio en la tarjeta SD
-bool saveAudioToSD(const char* base64Audio, const char* filename) {
-  // Calcular la longitud del audio decodificado
-  int inputLen = strlen(base64Audio);
-  int audioLength = base64_dec_len((char*)base64Audio, inputLen);
-  uint8_t* audioData = new uint8_t[audioLength];
+// Escribe el archivo decodificado en la tarjeta SD
+void decode_base64_to_file(const char* base64_input, const char* output_file) {
+  unsigned int input_length = strlen(base64_input);
+  unsigned char* decoded_data = (unsigned char*)malloc(decode_base64_length((unsigned char*)base64_input, input_length));
+  unsigned int decoded_length = decode_base64((unsigned char*)base64_input, input_length, decoded_data);
 
-  // Decodificar el audio Base64
-  int actualLength = base64_decode((char*)audioData, (char*)base64Audio, inputLen);
-
-  if (actualLength != audioLength) {
-    Serial.println("Error al decodificar el audio Base64.");
-    delete[] audioData;
-    return false;
+  File file = SD.open(output_file, FILE_WRITE);
+  if (!file) {
+    Serial.println("No se pudo abrir el archivo de salida.");
+    free(decoded_data);
+    return;
   }
 
-  // Crear y abrir el archivo en la tarjeta SD
-  File audioFile = SD.open(filename, FILE_WRITE);
-  if (!audioFile) {
-    Serial.println("Error al abrir el archivo en la tarjeta SD.");
-    delete[] audioData;
-    return false;
-  }
-
-  // Escribir los datos de audio en el archivo
-  audioFile.write(audioData, audioLength);
-  audioFile.close();
-
-  Serial.println("Audio guardado exitosamente en la tarjeta SD.");
-  delete[] audioData;
-  return true;
+  file.write(decoded_data, decoded_length);
+  file.close();
+  free(decoded_data);
 }
-*/
 
 void loop() {
-  // Nada que hacer en loop
+  // No se necesita hacer nada en el loop
 }
