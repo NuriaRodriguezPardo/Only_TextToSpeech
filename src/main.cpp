@@ -35,7 +35,7 @@ void setup() {
     }
 
     // Texto a convertir en voz
-    const char* text = "Hola, como estas? Yo soy Núria, y tu? Esto es una prueba para saber si google soporta audios grandes, porque con el mio no va.";
+    const char* text = "Buenos dias, buenas tardes, señoras y señoras, presentamos a las mujeres mas guapas del mundo, Montse y Nuria";
 
     // Idioma de destino
     const char* idioma = "Spanish";
@@ -47,7 +47,7 @@ void setup() {
     if (strlen(base64Audio) > 0)
     {
         // Ejemplo de cadena Base64 (deberías usar tu propia cadena Base64 de audio)
-        const char* output_file = "/AudioDecodificado_hola.wav";
+        const char* output_file = "/Señores_Señoras.wav";
         decode_base64_to_file(base64Audio, output_file);
         Serial.println("Archivo de audio decodificado guardado como AudioDecodificado.wav");
     } else {
